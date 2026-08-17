@@ -46,6 +46,9 @@ main{padding:18px 20px 60px}
 .b-idle{background:rgba(107,114,128,.2);color:#c3c9d4}
 .b-working,.b-running{background:rgba(110,168,254,.18);color:var(--blue)}
 .b-offline,.b-cancelled{background:rgba(107,114,128,.15);color:var(--gray)}
+.b-approved,.b-published{background:rgba(49,196,141,.16);color:var(--green)}
+.b-rejected{background:rgba(242,109,109,.18);color:var(--red)}
+.b-pending_approval{background:rgba(246,183,60,.18);color:var(--amber)}
 .b-done{background:rgba(49,196,141,.16);color:var(--green)}
 .b-pending{background:rgba(107,114,128,.2);color:#c3c9d4}
 .b-failed{background:rgba(242,109,109,.18);color:var(--red)}

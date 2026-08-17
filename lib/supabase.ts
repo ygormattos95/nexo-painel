@@ -45,3 +45,15 @@ export type Result = {
   content: string;
   created_at: string;
 };
+
+export type PostQueue = {
+  id: string;
+  theme: string | null;
+  caption: string | null;
+  image_url: string | null;
+  platforms: string[] | null;
+  scheduled_for: string | null;
+  status: string;
+  created_at: string;
+  published_at: string | null;
+};

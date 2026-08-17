@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, useCallback } from "react";
-import { supabase, Agent, Task, TaskLog, Result } from "@/lib/supabase";
+import { supabase, Agent, Task, TaskLog, Result, PostQueue } from "@/lib/supabase";
 
 const fmt = (d?: string | null) =>
   d ? new Date(d).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—";
@@ -72,19 +72,28 @@ function Login({ email, onEmail }: { email: string; onEmail: (v: string) => void
 function Dashboard({ userEmail }: { userEmail: string }) {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
-  const [tab, setTab] = useState<"overview" | "tasks" | "metrics">("overview");
+  const [tab, setTab] = useState<"overview" | "tasks" | "metrics" | "aprovacoes">("overview");
   const [fArea, setFArea] = useState("");
   const [fStatus, setFStatus] = useState("");
   const [openTask, setOpenTask] = useState<Task | null>(null);
+  const [queue, setQueue] = useState<PostQueue[]>([]);
 
   const load = useCallback(async () => {
-    const [{ data: a }, { data: t }] = await Promise.all([
+    const [{ data: a }, { data: t }, { data: q }] = await Promise.all([
       supabase.from("agents").select("*").order("kind", { ascending: false }).order("area", { nullsFirst: true }),
       supabase.from("tasks").select("id,area,status,priority,objective,created_at,parent_task_id").order("created_at", { ascending: false }).limit(300),
+      supabase.from("post_queue").select("*").order("created_at", { ascending: false }).limit(100),
     ]);
     setAgents((a as Agent[]) ?? []);
     setTasks((t as Task[]) ?? []);
+    setQueue((q as PostQueue[]) ?? []);
   }, []);
+
+  const setPostStatus = async (id: string, status: string) => {
+    setQueue((prev) => prev.map((p) => (p.id === id ? { ...p, status } : p)));
+    await supabase.from("post_queue").update({ status }).eq("id", id);
+    load();
+  };
 
   useEffect(() => {
     load();
@@ -92,11 +101,14 @@ function Dashboard({ userEmail }: { userEmail: string }) {
       .channel("nexo-live")
       .on("postgres_changes", { event: "*", schema: "public", table: "tasks" }, load)
       .on("postgres_changes", { event: "*", schema: "public", table: "agents" }, load)
+      .on("postgres_changes", { event: "*", schema: "public", table: "post_queue" }, load)
       .subscribe();
     return () => {
       supabase.removeChannel(ch);
     };
   }, [load]);
+
+  const pendingCount = queue.filter((p) => p.status === "pending_approval").length;
 
   const statsForArea = (area: string | null) => {
     const t = tasks.filter((x) => x.area === area);
@@ -135,9 +147,15 @@ function Dashboard({ userEmail }: { userEmail: string }) {
       </header>
 
       <div className="tabs">
-        {(["overview", "tasks", "metrics"] as const).map((t) => (
+        {(["overview", "tasks", "aprovacoes", "metrics"] as const).map((t) => (
           <div key={t} className={`tab ${tab === t ? "active" : ""}`} onClick={() => setTab(t)}>
-            {t === "overview" ? "Visão Geral" : t === "tasks" ? "Tarefas" : "Métricas"}
+            {t === "overview"
+              ? "Visão Geral"
+              : t === "tasks"
+              ? "Tarefas"
+              : t === "aprovacoes"
+              ? `Aprovações${pendingCount ? ` (${pendingCount})` : ""}`
+              : "Métricas"}
           </div>
         ))}
       </div>
@@ -264,6 +282,63 @@ function Dashboard({ userEmail }: { userEmail: string }) {
                       Nenhuma tarefa.
                     </td>
                   </tr>
+                )}
+              </tbody>
+            </table>
+          </section>
+        )}
+
+        {tab === "aprovacoes" && (
+          <section>
+            <div className="section-title">Pendentes de aprovação</div>
+            <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fill,minmax(300px,1fr))" }}>
+              {queue.filter((p) => p.status === "pending_approval").map((p) => (
+                <div key={p.id} className="card" style={{ overflow: "hidden" }}>
+                  {p.image_url && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={p.image_url} alt={p.theme || "post"} style={{ width: "100%", display: "block", borderBottom: "1px solid var(--line)" }} />
+                  )}
+                  <div style={{ padding: 14 }}>
+                    <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8 }}>
+                      <span className="badge b-running">{p.theme || "Post"}</span>
+                      <span className="mono">{fmt(p.scheduled_for)}</span>
+                    </div>
+                    <div style={{ whiteSpace: "pre-wrap", fontSize: 13, maxHeight: 160, overflow: "auto" }}>{p.caption}</div>
+                    <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+                      <button style={{ flex: 1, background: "var(--green)", color: "#04140c" }} onClick={() => setPostStatus(p.id, "approved")}>
+                        ✅ Aprovar
+                      </button>
+                      <button className="ghost" style={{ flex: 1 }} onClick={() => setPostStatus(p.id, "rejected")}>
+                        ❌ Recusar
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+              {pendingCount === 0 && <span className="muted">Nenhum post pendente. 🎉</span>}
+            </div>
+
+            <div className="section-title">Recentes</div>
+            <table>
+              <thead>
+                <tr>
+                  <th>Tema</th>
+                  <th>Legenda</th>
+                  <th>Status</th>
+                  <th>Agendado</th>
+                </tr>
+              </thead>
+              <tbody>
+                {queue.filter((p) => p.status !== "pending_approval").slice(0, 20).map((p) => (
+                  <tr key={p.id}>
+                    <td>{p.theme}</td>
+                    <td className="trunc" title={p.caption || ""}>{p.caption}</td>
+                    <td><Badge s={p.status} /></td>
+                    <td className="mono">{fmt(p.scheduled_for)}</td>
+                  </tr>
+                ))}
+                {queue.filter((p) => p.status !== "pending_approval").length === 0 && (
+                  <tr><td colSpan={4} className="muted">Sem histórico ainda.</td></tr>
                 )}
               </tbody>
             </table>
