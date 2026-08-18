@@ -293,27 +293,7 @@ function Dashboard({ userEmail }: { userEmail: string }) {
             <div className="section-title">Pendentes de aprovação</div>
             <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fill,minmax(300px,1fr))" }}>
               {queue.filter((p) => p.status === "pending_approval").map((p) => (
-                <div key={p.id} className="card" style={{ overflow: "hidden" }}>
-                  {p.image_url && (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={p.image_url} alt={p.theme || "post"} style={{ width: "100%", display: "block", borderBottom: "1px solid var(--line)" }} />
-                  )}
-                  <div style={{ padding: 14 }}>
-                    <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8 }}>
-                      <span className="badge b-running">{p.theme || "Post"}</span>
-                      <span className="mono">{fmt(p.scheduled_for)}</span>
-                    </div>
-                    <div style={{ whiteSpace: "pre-wrap", fontSize: 13, maxHeight: 160, overflow: "auto" }}>{p.caption}</div>
-                    <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-                      <button style={{ flex: 1, background: "var(--green)", color: "#04140c" }} onClick={() => setPostStatus(p.id, "approved")}>
-                        ✅ Aprovar
-                      </button>
-                      <button className="ghost" style={{ flex: 1 }} onClick={() => setPostStatus(p.id, "rejected")}>
-                        ❌ Recusar
-                      </button>
-                    </div>
-                  </div>
-                </div>
+                <ApprovalCard key={p.id} post={p} onStatus={setPostStatus} />
               ))}
               {pendingCount === 0 && <span className="muted">Nenhum post pendente. 🎉</span>}
             </div>
@@ -378,6 +358,83 @@ function Dashboard({ userEmail }: { userEmail: string }) {
       </main>
 
       <TaskDrawer task={openTask} onClose={() => setOpenTask(null)} />
+    </div>
+  );
+}
+
+const REGEN_URL = "https://n8nfloripa.floripacloset.com.br/webhook/nexo-regen-imagem";
+
+function ApprovalCard({ post, onStatus }: { post: PostQueue; onStatus: (id: string, s: string) => void }) {
+  const [caption, setCaption] = useState(post.caption || "");
+  const [regenPrompt, setRegenPrompt] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [regen, setRegen] = useState(false);
+
+  useEffect(() => {
+    setCaption(post.caption || "");
+  }, [post.caption]);
+
+  const saveCaption = async () => {
+    setSaving(true);
+    await supabase.from("post_queue").update({ caption }).eq("id", post.id);
+    setSaving(false);
+  };
+
+  const regenerate = async () => {
+    setRegen(true);
+    try {
+      await fetch(REGEN_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ post_id: post.id, prompt: regenPrompt }),
+      });
+    } catch (e) {
+      /* realtime trará a nova imagem */
+    }
+    setTimeout(() => setRegen(false), 9000);
+  };
+
+  return (
+    <div className="card" style={{ overflow: "hidden" }}>
+      {post.image_url && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={post.image_url}
+          alt={post.theme || "post"}
+          style={{ width: "100%", display: "block", borderBottom: "1px solid var(--line)", opacity: regen ? 0.4 : 1, transition: "opacity .3s" }}
+        />
+      )}
+      <div style={{ padding: 14 }}>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8 }}>
+          <span className="badge b-running">{post.theme || "Post"}</span>
+          <span className="mono">{fmt(post.scheduled_for)}</span>
+        </div>
+        <textarea value={caption} onChange={(e) => setCaption(e.target.value)} rows={6} style={{ width: "100%", resize: "vertical", fontSize: 13 }} />
+        <div style={{ marginTop: 6 }}>
+          <button className="ghost" onClick={saveCaption} disabled={saving || caption === (post.caption || "")}>
+            {saving ? "Salvando…" : "Salvar legenda"}
+          </button>
+        </div>
+        <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
+          <input
+            value={regenPrompt}
+            onChange={(e) => setRegenPrompt(e.target.value)}
+            placeholder="Ajuste da imagem (opcional)"
+            style={{ flex: 1, fontSize: 12 }}
+          />
+          <button className="ghost" onClick={regenerate} disabled={regen}>
+            {regen ? "Gerando…" : "🔄 Imagem"}
+          </button>
+        </div>
+        <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+          <button style={{ flex: 1, background: "var(--green)", color: "#04140c" }} onClick={() => onStatus(post.id, "approved")}>
+            ✅ Aprovar
+          </button>
+          <button className="ghost" style={{ flex: 1 }} onClick={() => onStatus(post.id, "rejected")}>
+            ❌ Recusar
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
