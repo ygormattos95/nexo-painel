@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, useCallback } from "react";
-import { supabase, Agent, Task, TaskLog, Result, PostQueue } from "@/lib/supabase";
+import { supabase, Agent, Task, TaskLog, Result, PostQueue, InboxConversation, InboxMessage } from "@/lib/supabase";
 
 const fmt = (d?: string | null) =>
   d ? new Date(d).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—";
@@ -72,7 +72,7 @@ function Login({ email, onEmail }: { email: string; onEmail: (v: string) => void
 function Dashboard({ userEmail }: { userEmail: string }) {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
-  const [tab, setTab] = useState<"overview" | "tasks" | "metrics" | "aprovacoes">("overview");
+  const [tab, setTab] = useState<"overview" | "tasks" | "metrics" | "aprovacoes" | "chat">("overview");
   const [fArea, setFArea] = useState("");
   const [fStatus, setFStatus] = useState("");
   const [openTask, setOpenTask] = useState<Task | null>(null);
@@ -147,7 +147,7 @@ function Dashboard({ userEmail }: { userEmail: string }) {
       </header>
 
       <div className="tabs">
-        {(["overview", "tasks", "aprovacoes", "metrics"] as const).map((t) => (
+        {(["overview", "tasks", "aprovacoes", "chat", "metrics"] as const).map((t) => (
           <div key={t} className={`tab ${tab === t ? "active" : ""}`} onClick={() => setTab(t)}>
             {t === "overview"
               ? "Visão Geral"
@@ -155,6 +155,8 @@ function Dashboard({ userEmail }: { userEmail: string }) {
               ? "Tarefas"
               : t === "aprovacoes"
               ? `Aprovações${pendingCount ? ` (${pendingCount})` : ""}`
+              : t === "chat"
+              ? "Chat"
               : "Métricas"}
           </div>
         ))}
@@ -325,6 +327,8 @@ function Dashboard({ userEmail }: { userEmail: string }) {
           </section>
         )}
 
+        {tab === "chat" && <ChatTab />}
+
         {tab === "metrics" && (
           <section>
             <div className="grid metrics">
@@ -359,6 +363,141 @@ function Dashboard({ userEmail }: { userEmail: string }) {
 
       <TaskDrawer task={openTask} onClose={() => setOpenTask(null)} />
     </div>
+  );
+}
+
+function ChatTab() {
+  const [convs, setConvs] = useState<InboxConversation[]>([]);
+  const [net, setNet] = useState<"all" | "instagram" | "facebook">("all");
+  const [sel, setSel] = useState<string | null>(null);
+  const [msgs, setMsgs] = useState<InboxMessage[]>([]);
+  const [reply, setReply] = useState("");
+  const [sending, setSending] = useState(false);
+
+  const loadConvs = useCallback(async () => {
+    const { data } = await supabase.from("inbox_conversations").select("*").order("last_message_at", { ascending: false }).limit(200);
+    setConvs((data as InboxConversation[]) ?? []);
+  }, []);
+
+  const loadMsgs = useCallback(async (id: string) => {
+    const { data } = await supabase.from("inbox_messages").select("*").eq("conversation_id", id).order("created_at", { ascending: true }).limit(500);
+    setMsgs((data as InboxMessage[]) ?? []);
+  }, []);
+
+  useEffect(() => {
+    loadConvs();
+    const ch = supabase
+      .channel("nexo-inbox")
+      .on("postgres_changes", { event: "*", schema: "public", table: "inbox_conversations" }, loadConvs)
+      .on("postgres_changes", { event: "*", schema: "public", table: "inbox_messages" }, (p: any) => {
+        loadConvs();
+        const cid = p?.new?.conversation_id ?? p?.old?.conversation_id;
+        if (sel && cid === sel) loadMsgs(sel);
+      })
+      .subscribe();
+    return () => {
+      supabase.removeChannel(ch);
+    };
+  }, [loadConvs, loadMsgs, sel]);
+
+  useEffect(() => {
+    if (sel) loadMsgs(sel);
+  }, [sel, loadMsgs]);
+
+  const filtered = convs.filter((c) => net === "all" || c.network === net);
+  const selConv = convs.find((c) => c.id === sel) || null;
+  const netIcon = (n: string) => (n === "instagram" ? "📸" : n === "facebook" ? "📘" : "💬");
+
+  const send = async () => {
+    if (!sel || !reply.trim()) return;
+    setSending(true);
+    const text = reply;
+    setReply("");
+    await supabase.from("inbox_messages").insert({ conversation_id: sel, direction: "out", sender: "human", text });
+    await supabase.from("inbox_conversations").update({ last_message_at: new Date().toISOString() }).eq("id", sel);
+    await loadMsgs(sel);
+    setSending(false);
+  };
+
+  const toggleHuman = async () => {
+    if (!selConv) return;
+    const next = selConv.status === "human" ? "bot" : "human";
+    await supabase.from("inbox_conversations").update({ status: next }).eq("id", selConv.id);
+    loadConvs();
+  };
+
+  return (
+    <section>
+      <div className="toolbar">
+        {(["all", "instagram", "facebook"] as const).map((n) => (
+          <button key={n} className={net === n ? "" : "ghost"} onClick={() => setNet(n)}>
+            {n === "all" ? "Todas" : n === "instagram" ? "📸 Instagram" : "📘 Facebook"}
+          </button>
+        ))}
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "300px 1fr", gap: 12 }}>
+        <div className="card" style={{ padding: 0, overflow: "auto", maxHeight: 560 }}>
+          {filtered.map((c) => (
+            <div
+              key={c.id}
+              onClick={() => setSel(c.id)}
+              className="clickable"
+              style={{ padding: 12, borderBottom: "1px solid var(--line)", background: sel === c.id ? "var(--panel2)" : "transparent", cursor: "pointer" }}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 6 }}>
+                <strong style={{ fontSize: 13 }}>{netIcon(c.network)} {c.name || c.external_id}</strong>
+                {c.status === "human" && <span className="badge b-needs_review">humano</span>}
+              </div>
+              <div className="mono">{fmt(c.last_message_at)}</div>
+            </div>
+          ))}
+          {filtered.length === 0 && <div style={{ padding: 12 }} className="muted">Nenhuma conversa.</div>}
+        </div>
+
+        <div className="card" style={{ display: "flex", flexDirection: "column", maxHeight: 560 }}>
+          {!selConv ? (
+            <div style={{ padding: 16 }} className="muted">Selecione uma conversa à esquerda.</div>
+          ) : (
+            <>
+              <div className="dhead">
+                <strong>{netIcon(selConv.network)} {selConv.name || selConv.external_id}</strong>
+                <span className={`badge b-${selConv.status === "human" ? "needs_review" : "running"}`}>{selConv.status === "human" ? "humano" : "IA"}</span>
+                <div className="spacer"></div>
+                <button className="ghost" onClick={toggleHuman}>{selConv.status === "human" ? "Devolver à IA" : "Assumir (humano)"}</button>
+              </div>
+              <div style={{ flex: 1, overflow: "auto", padding: 14, display: "flex", flexDirection: "column", gap: 8 }}>
+                {msgs.map((m) => (
+                  <div key={m.id} style={{ alignSelf: m.direction === "in" ? "flex-start" : "flex-end", maxWidth: "75%" }}>
+                    <div
+                      style={{
+                        background: m.direction === "in" ? "var(--panel2)" : m.sender === "ai" ? "rgba(110,168,254,.18)" : "rgba(49,196,141,.18)",
+                        border: "1px solid var(--line)",
+                        borderRadius: 10,
+                        padding: "8px 12px",
+                        whiteSpace: "pre-wrap",
+                        fontSize: 13,
+                      }}
+                    >
+                      {m.text}
+                    </div>
+                    <div className="mono" style={{ textAlign: m.direction === "in" ? "left" : "right" }}>
+                      {m.direction === "in" ? "cliente" : m.sender === "ai" ? "IA" : "você"} · {fmt(m.created_at)}
+                    </div>
+                  </div>
+                ))}
+                {msgs.length === 0 && <span className="muted">Sem mensagens.</span>}
+              </div>
+              <div style={{ display: "flex", gap: 8, padding: 12, borderTop: "1px solid var(--line)" }}>
+                <input value={reply} onChange={(e) => setReply(e.target.value)} onKeyDown={(e) => e.key === "Enter" && send()} placeholder="Responder…" style={{ flex: 1 }} />
+                <button onClick={send} disabled={sending || !reply.trim()}>
+                  Enviar
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </section>
   );
 }
 

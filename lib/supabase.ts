@@ -57,3 +57,21 @@ export type PostQueue = {
   created_at: string;
   published_at: string | null;
 };
+
+export type InboxConversation = {
+  id: string;
+  network: string;
+  external_id: string;
+  name: string | null;
+  status: string;
+  last_message_at: string | null;
+};
+
+export type InboxMessage = {
+  id: number;
+  conversation_id: string;
+  direction: string;
+  sender: string;
+  text: string | null;
+  created_at: string;
+};
