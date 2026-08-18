@@ -75,3 +75,16 @@ export type InboxMessage = {
   text: string | null;
   created_at: string;
 };
+
+export type Client = {
+  id: string;
+  name: string;
+};
+
+export type Knowledge = {
+  id: string;
+  client_id: string | null;
+  title: string | null;
+  content: string;
+  created_at: string;
+};

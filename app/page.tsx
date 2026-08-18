@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, useCallback } from "react";
-import { supabase, Agent, Task, TaskLog, Result, PostQueue, InboxConversation, InboxMessage } from "@/lib/supabase";
+import { supabase, Agent, Task, TaskLog, Result, PostQueue, InboxConversation, InboxMessage, Client, Knowledge } from "@/lib/supabase";
 
 const fmt = (d?: string | null) =>
   d ? new Date(d).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—";
@@ -72,7 +72,7 @@ function Login({ email, onEmail }: { email: string; onEmail: (v: string) => void
 function Dashboard({ userEmail }: { userEmail: string }) {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
-  const [tab, setTab] = useState<"overview" | "tasks" | "metrics" | "aprovacoes" | "chat">("overview");
+  const [tab, setTab] = useState<"overview" | "tasks" | "metrics" | "aprovacoes" | "chat" | "conhecimento">("overview");
   const [fArea, setFArea] = useState("");
   const [fStatus, setFStatus] = useState("");
   const [openTask, setOpenTask] = useState<Task | null>(null);
@@ -147,7 +147,7 @@ function Dashboard({ userEmail }: { userEmail: string }) {
       </header>
 
       <div className="tabs">
-        {(["overview", "tasks", "aprovacoes", "chat", "metrics"] as const).map((t) => (
+        {(["overview", "tasks", "aprovacoes", "chat", "conhecimento", "metrics"] as const).map((t) => (
           <div key={t} className={`tab ${tab === t ? "active" : ""}`} onClick={() => setTab(t)}>
             {t === "overview"
               ? "Visão Geral"
@@ -157,6 +157,8 @@ function Dashboard({ userEmail }: { userEmail: string }) {
               ? `Aprovações${pendingCount ? ` (${pendingCount})` : ""}`
               : t === "chat"
               ? "Chat"
+              : t === "conhecimento"
+              ? "Conhecimento"
               : "Métricas"}
           </div>
         ))}
@@ -329,6 +331,8 @@ function Dashboard({ userEmail }: { userEmail: string }) {
 
         {tab === "chat" && <ChatTab />}
 
+        {tab === "conhecimento" && <ConhecimentoTab />}
+
         {tab === "metrics" && (
           <section>
             <div className="grid metrics">
@@ -363,6 +367,129 @@ function Dashboard({ userEmail }: { userEmail: string }) {
 
       <TaskDrawer task={openTask} onClose={() => setOpenTask(null)} />
     </div>
+  );
+}
+
+const LEARN_URL = "https://n8nfloripa.floripacloset.com.br/webhook/nexo-aprender";
+
+function ConhecimentoTab() {
+  const [clients, setClients] = useState<Client[]>([]);
+  const [clientId, setClientId] = useState<string>("");
+  const [items, setItems] = useState<Knowledge[]>([]);
+  const [title, setTitle] = useState("");
+  const [content, setContent] = useState("");
+  const [newClient, setNewClient] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const loadClients = useCallback(async () => {
+    const { data } = await supabase.from("clients").select("*").order("name");
+    const list = (data as Client[]) ?? [];
+    setClients(list);
+    setClientId((prev) => prev || (list[0]?.id ?? ""));
+  }, []);
+
+  const loadItems = useCallback(async (cid: string) => {
+    if (!cid) return;
+    const { data } = await supabase.from("brand_knowledge").select("id,client_id,title,content,created_at").eq("client_id", cid).order("created_at", { ascending: false });
+    setItems((data as Knowledge[]) ?? []);
+  }, []);
+
+  useEffect(() => {
+    loadClients();
+  }, [loadClients]);
+
+  useEffect(() => {
+    if (clientId) loadItems(clientId);
+    const ch = supabase
+      .channel("nexo-kb")
+      .on("postgres_changes", { event: "*", schema: "public", table: "brand_knowledge" }, () => clientId && loadItems(clientId))
+      .subscribe();
+    return () => {
+      supabase.removeChannel(ch);
+    };
+  }, [clientId, loadItems]);
+
+  const addKnowledge = async () => {
+    if (!clientId || !content.trim()) return;
+    setSaving(true);
+    try {
+      await fetch(LEARN_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ client_id: clientId, title: title || "Sem título", content }),
+      });
+    } catch (e) {
+      /* realtime trará o item */
+    }
+    setTitle("");
+    setContent("");
+    setTimeout(() => {
+      loadItems(clientId);
+      setSaving(false);
+    }, 2500);
+  };
+
+  const remove = async (id: string) => {
+    await supabase.from("brand_knowledge").delete().eq("id", id);
+    loadItems(clientId);
+  };
+
+  const addClient = async () => {
+    if (!newClient.trim()) return;
+    const { data } = await supabase.from("clients").insert({ name: newClient }).select().single();
+    setNewClient("");
+    await loadClients();
+    if (data) setClientId((data as Client).id);
+  };
+
+  return (
+    <section>
+      <div className="toolbar">
+        <span className="muted">Cliente:</span>
+        <select value={clientId} onChange={(e) => setClientId(e.target.value)}>
+          {clients.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name}
+            </option>
+          ))}
+        </select>
+        <input value={newClient} onChange={(e) => setNewClient(e.target.value)} placeholder="Novo cliente" style={{ width: 160 }} />
+        <button className="ghost" onClick={addClient} disabled={!newClient.trim()}>
+          + Cliente
+        </button>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+        <div className="card" style={{ padding: 14 }}>
+          <div className="section-title" style={{ marginTop: 0 }}>Adicionar conhecimento</div>
+          <label>Título</label>
+          <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Ex.: Tom de voz, FAQ, Preços…" />
+          <label>Conteúdo</label>
+          <textarea value={content} onChange={(e) => setContent(e.target.value)} rows={8} style={{ width: "100%", resize: "vertical" }} placeholder="Cole aqui as informações da marca/cliente…" />
+          <div style={{ marginTop: 10 }}>
+            <button onClick={addKnowledge} disabled={saving || !content.trim()}>
+              {saving ? "Salvando…" : "Salvar na base"}
+            </button>
+          </div>
+        </div>
+
+        <div className="card" style={{ padding: 0, overflow: "auto", maxHeight: 520 }}>
+          <div className="section-title" style={{ margin: 14 }}>Base atual ({items.length})</div>
+          {items.map((k) => (
+            <div key={k.id} style={{ padding: 14, borderTop: "1px solid var(--line)" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                <strong style={{ fontSize: 13 }}>{k.title || "Sem título"}</strong>
+                <button className="ghost" style={{ padding: "2px 8px" }} onClick={() => remove(k.id)}>
+                  Remover
+                </button>
+              </div>
+              <div className="trunc" style={{ maxWidth: "100%", color: "var(--muted)", fontSize: 12, marginTop: 4 }}>{k.content}</div>
+            </div>
+          ))}
+          {items.length === 0 && <div style={{ padding: 14 }} className="muted">Nenhum conhecimento ainda. Adicione ao lado.</div>}
+        </div>
+      </div>
+    </section>
   );
 }
 
