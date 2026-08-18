@@ -310,19 +310,33 @@ function Dashboard({ userEmail }: { userEmail: string }) {
                   <th>Legenda</th>
                   <th>Status</th>
                   <th>Agendado</th>
+                  <th>Post</th>
                 </tr>
               </thead>
               <tbody>
-                {queue.filter((p) => p.status !== "pending_approval").slice(0, 20).map((p) => (
-                  <tr key={p.id}>
-                    <td>{p.theme}</td>
-                    <td className="trunc" title={p.caption || ""}>{p.caption}</td>
-                    <td><Badge s={p.status} /></td>
-                    <td className="mono">{fmt(p.scheduled_for)}</td>
-                  </tr>
-                ))}
+                {queue.filter((p) => p.status !== "pending_approval").slice(0, 20).map((p) => {
+                  const fbUrl = p.fb_result ? `https://www.facebook.com/${p.fb_result.split("_")[0]}/posts/${p.fb_result.split("_")[1] || ""}` : null;
+                  const igUrl = p.ig_result ? "https://instagram.com/nexo.automacao" : null;
+                  return (
+                    <tr key={p.id}>
+                      <td>{p.theme}</td>
+                      <td className="trunc" title={p.caption || ""}>{p.caption}</td>
+                      <td><Badge s={p.status} /></td>
+                      <td className="mono">{fmt(p.scheduled_for)}</td>
+                      <td>
+                        {igUrl && (
+                          <a href={igUrl} target="_blank" rel="noreferrer" style={{ marginRight: 8 }}>📸 IG</a>
+                        )}
+                        {fbUrl && (
+                          <a href={fbUrl} target="_blank" rel="noreferrer">📘 FB</a>
+                        )}
+                        {!igUrl && !fbUrl && <span className="muted">—</span>}
+                      </td>
+                    </tr>
+                  );
+                })}
                 {queue.filter((p) => p.status !== "pending_approval").length === 0 && (
-                  <tr><td colSpan={4} className="muted">Sem histórico ainda.</td></tr>
+                  <tr><td colSpan={5} className="muted">Sem histórico ainda.</td></tr>
                 )}
               </tbody>
             </table>
@@ -635,10 +649,15 @@ function ApprovalCard({ post, onStatus }: { post: PostQueue; onStatus: (id: stri
   const [regenPrompt, setRegenPrompt] = useState("");
   const [saving, setSaving] = useState(false);
   const [regen, setRegen] = useState(false);
+  const [imgUrl, setImgUrl] = useState(post.image_url);
 
   useEffect(() => {
     setCaption(post.caption || "");
   }, [post.caption]);
+
+  useEffect(() => {
+    setImgUrl(post.image_url);
+  }, [post.image_url]);
 
   const saveCaption = async () => {
     setSaving(true);
@@ -648,6 +667,7 @@ function ApprovalCard({ post, onStatus }: { post: PostQueue; onStatus: (id: stri
 
   const regenerate = async () => {
     setRegen(true);
+    const before = post.image_url;
     try {
       await fetch(REGEN_URL, {
         method: "POST",
@@ -655,17 +675,30 @@ function ApprovalCard({ post, onStatus }: { post: PostQueue; onStatus: (id: stri
         body: JSON.stringify({ post_id: post.id, prompt: regenPrompt }),
       });
     } catch (e) {
-      /* realtime trará a nova imagem */
+      /* segue e busca a nova imagem abaixo */
     }
-    setTimeout(() => setRegen(false), 9000);
+    let tries = 0;
+    const iv = setInterval(async () => {
+      tries++;
+      const { data } = await supabase.from("post_queue").select("image_url").eq("id", post.id).single();
+      const url = (data as { image_url: string | null } | null)?.image_url ?? null;
+      if (url && url !== before) {
+        setImgUrl(url);
+        setRegen(false);
+        clearInterval(iv);
+      } else if (tries >= 10) {
+        setRegen(false);
+        clearInterval(iv);
+      }
+    }, 3000);
   };
 
   return (
     <div className="card" style={{ overflow: "hidden" }}>
-      {post.image_url && (
+      {imgUrl && (
         // eslint-disable-next-line @next/next/no-img-element
         <img
-          src={post.image_url}
+          src={imgUrl}
           alt={post.theme || "post"}
           style={{ width: "100%", display: "block", borderBottom: "1px solid var(--line)", opacity: regen ? 0.4 : 1, transition: "opacity .3s" }}
         />
