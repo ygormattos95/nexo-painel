@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, useCallback } from "react";
-import { supabase, Agent, Task, TaskLog, Result, PostQueue, InboxConversation, InboxMessage, Client, Knowledge } from "@/lib/supabase";
+import { supabase, Agent, Task, TaskLog, Result, PostQueue, InboxConversation, InboxMessage, Client, Knowledge, Campaign } from "@/lib/supabase";
 
 const fmt = (d?: string | null) =>
   d ? new Date(d).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—";
@@ -72,7 +72,7 @@ function Login({ email, onEmail }: { email: string; onEmail: (v: string) => void
 function Dashboard({ userEmail }: { userEmail: string }) {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
-  const [tab, setTab] = useState<"overview" | "tasks" | "metrics" | "aprovacoes" | "chat" | "conhecimento">("overview");
+  const [tab, setTab] = useState<"overview" | "tasks" | "metrics" | "aprovacoes" | "chat" | "conhecimento" | "campanhas">("overview");
   const [fArea, setFArea] = useState("");
   const [fStatus, setFStatus] = useState("");
   const [openTask, setOpenTask] = useState<Task | null>(null);
@@ -147,7 +147,7 @@ function Dashboard({ userEmail }: { userEmail: string }) {
       </header>
 
       <div className="tabs">
-        {(["overview", "tasks", "aprovacoes", "chat", "conhecimento", "metrics"] as const).map((t) => (
+        {(["overview", "tasks", "aprovacoes", "chat", "conhecimento", "campanhas", "metrics"] as const).map((t) => (
           <div key={t} className={`tab ${tab === t ? "active" : ""}`} onClick={() => setTab(t)}>
             {t === "overview"
               ? "Visão Geral"
@@ -159,6 +159,8 @@ function Dashboard({ userEmail }: { userEmail: string }) {
               ? "Chat"
               : t === "conhecimento"
               ? "Conhecimento"
+              : t === "campanhas"
+              ? "Campanhas"
               : "Métricas"}
           </div>
         ))}
@@ -344,6 +346,8 @@ function Dashboard({ userEmail }: { userEmail: string }) {
         )}
 
         {tab === "chat" && <ChatTab />}
+
+        {tab === "campanhas" && <CampanhasTab />}
 
         {tab === "conhecimento" && <ConhecimentoTab />}
 
@@ -650,6 +654,111 @@ function ChatTab() {
           )}
         </div>
       </div>
+    </section>
+  );
+}
+
+function CampanhasTab() {
+  const [items, setItems] = useState<Campaign[]>([]);
+  const [counts, setCounts] = useState<Record<string, number>>({});
+  const [name, setName] = useState("");
+  const [objective, setObjective] = useState("");
+  const [starts, setStarts] = useState("");
+  const [ends, setEnds] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const load = useCallback(async () => {
+    const { data } = await supabase.from("campaigns").select("*").order("created_at", { ascending: false });
+    setItems((data as Campaign[]) ?? []);
+    const { data: pq } = await supabase.from("post_queue").select("campaign_id");
+    const c: Record<string, number> = {};
+    (pq ?? []).forEach((p: any) => {
+      if (p.campaign_id) c[p.campaign_id] = (c[p.campaign_id] || 0) + 1;
+    });
+    setCounts(c);
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const create = async () => {
+    if (!name.trim()) return;
+    setSaving(true);
+    await supabase.from("campaigns").insert({ name, objective: objective || null, starts_on: starts || null, ends_on: ends || null });
+    setName("");
+    setObjective("");
+    setStarts("");
+    setEnds("");
+    await load();
+    setSaving(false);
+  };
+
+  const setStatus = async (id: string, status: string) => {
+    await supabase.from("campaigns").update({ status }).eq("id", id);
+    load();
+  };
+
+  return (
+    <section>
+      <div className="card" style={{ padding: 16, marginBottom: 14 }}>
+        <div style={{ fontWeight: 600, marginBottom: 10 }}>Nova campanha</div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+          <div>
+            <label>Nome</label>
+            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Ex.: Lançamento Ferramenta X" />
+          </div>
+          <div>
+            <label>Objetivo</label>
+            <input value={objective} onChange={(e) => setObjective(e.target.value)} placeholder="Ex.: gerar leads / awareness" />
+          </div>
+          <div>
+            <label>Início</label>
+            <input type="date" value={starts} onChange={(e) => setStarts(e.target.value)} />
+          </div>
+          <div>
+            <label>Fim</label>
+            <input type="date" value={ends} onChange={(e) => setEnds(e.target.value)} />
+          </div>
+        </div>
+        <div style={{ marginTop: 12 }}>
+          <button onClick={create} disabled={saving || !name.trim()}>Criar campanha</button>
+        </div>
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Campanha</th>
+            <th>Objetivo</th>
+            <th>Período</th>
+            <th>Posts</th>
+            <th>Status</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((c) => (
+            <tr key={c.id}>
+              <td><strong>{c.name}</strong></td>
+              <td className="muted">{c.objective || "—"}</td>
+              <td className="mono">{c.starts_on || "—"} → {c.ends_on || "—"}</td>
+              <td>{counts[c.id] || 0}</td>
+              <td><span className={`badge b-${c.status === "active" ? "running" : "cancelled"}`}>{c.status}</span></td>
+              <td>
+                <button className="ghost" onClick={() => setStatus(c.id, c.status === "active" ? "archived" : "active")}>
+                  {c.status === "active" ? "Arquivar" : "Reativar"}
+                </button>
+              </td>
+            </tr>
+          ))}
+          {items.length === 0 && (
+            <tr>
+              <td colSpan={6} className="muted">Nenhuma campanha ainda.</td>
+            </tr>
+          )}
+        </tbody>
+      </table>
     </section>
   );
 }

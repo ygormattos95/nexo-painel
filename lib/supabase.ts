@@ -90,3 +90,13 @@ export type Knowledge = {
   content: string;
   created_at: string;
 };
+
+export type Campaign = {
+  id: string;
+  name: string;
+  objective: string | null;
+  status: string;
+  starts_on: string | null;
+  ends_on: string | null;
+  created_at: string;
+};
