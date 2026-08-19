@@ -77,16 +77,31 @@ function Dashboard({ userEmail }: { userEmail: string }) {
   const [fStatus, setFStatus] = useState("");
   const [openTask, setOpenTask] = useState<Task | null>(null);
   const [queue, setQueue] = useState<PostQueue[]>([]);
+  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+  const [cost, setCost] = useState<{ ai: number; posts: number; usd: number }>({ ai: 0, posts: 0, usd: 0 });
 
   const load = useCallback(async () => {
-    const [{ data: a }, { data: t }, { data: q }] = await Promise.all([
+    const since = new Date(Date.now() - 864e5).toISOString();
+    const [{ data: a }, { data: t }, { data: q }, { data: camps }, airRes, pstRes, { data: rates }] = await Promise.all([
       supabase.from("agents").select("*").order("kind", { ascending: false }).order("area", { nullsFirst: true }),
       supabase.from("tasks").select("id,area,status,priority,objective,created_at,parent_task_id").order("created_at", { ascending: false }).limit(300),
       supabase.from("post_queue").select("*").order("created_at", { ascending: false }).limit(100),
+      supabase.from("campaigns").select("*").order("created_at", { ascending: false }),
+      supabase.from("inbox_messages").select("id", { count: "exact", head: true }).eq("sender", "ai").gte("created_at", since),
+      supabase.from("post_queue").select("id", { count: "exact", head: true }).gte("created_at", since),
+      supabase.from("ai_cost_rates").select("*"),
     ]);
     setAgents((a as Agent[]) ?? []);
     setTasks((t as Task[]) ?? []);
     setQueue((q as PostQueue[]) ?? []);
+    setCampaigns((camps as Campaign[]) ?? []);
+    const rateMap: Record<string, number> = {};
+    (rates ?? []).forEach((r: any) => {
+      rateMap[r.item] = Number(r.unit_cost_usd);
+    });
+    const aiN = (airRes as { count: number | null }).count ?? 0;
+    const postN = (pstRes as { count: number | null }).count ?? 0;
+    setCost({ ai: aiN, posts: postN, usd: aiN * (rateMap["sac_reply"] || 0) + postN * (rateMap["post"] || 0) });
   }, []);
 
   const setPostStatus = async (id: string, status: string) => {
@@ -301,7 +316,7 @@ function Dashboard({ userEmail }: { userEmail: string }) {
             <div className="section-title">Pendentes de aprovação</div>
             <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fill,minmax(300px,1fr))" }}>
               {queue.filter((p) => p.status === "pending_approval").map((p) => (
-                <ApprovalCard key={p.id} post={p} onStatus={setPostStatus} />
+                <ApprovalCard key={p.id} post={p} onStatus={setPostStatus} campaigns={campaigns} />
               ))}
               {pendingCount === 0 && <span className="muted">Nenhum post pendente. 🎉</span>}
             </div>
@@ -371,6 +386,21 @@ function Dashboard({ userEmail }: { userEmail: string }) {
                   <div className="l">{l as string}</div>
                 </div>
               ))}
+            </div>
+            <div className="section-title">Custo de IA (estimado, 24h)</div>
+            <div className="grid metrics">
+              <div className="card metric">
+                <div className="n">${cost.usd.toFixed(2)}</div>
+                <div className="l">Custo estimado (24h)</div>
+              </div>
+              <div className="card metric">
+                <div className="n">{cost.ai}</div>
+                <div className="l">Respostas de IA (SAC)</div>
+              </div>
+              <div className="card metric">
+                <div className="n">{cost.posts}</div>
+                <div className="l">Posts gerados (24h)</div>
+              </div>
             </div>
             <div className="section-title">Tarefas por área</div>
             <div className="card" style={{ padding: 16 }}>
@@ -888,12 +918,13 @@ function CampanhasTab() {
 
 const REGEN_URL = "https://n8nfloripa.floripacloset.com.br/webhook/nexo-regen-imagem";
 
-function ApprovalCard({ post, onStatus }: { post: PostQueue; onStatus: (id: string, s: string) => void }) {
+function ApprovalCard({ post, onStatus, campaigns }: { post: PostQueue; onStatus: (id: string, s: string) => void; campaigns: Campaign[] }) {
   const [caption, setCaption] = useState(post.caption || "");
   const [regenPrompt, setRegenPrompt] = useState("");
   const [saving, setSaving] = useState(false);
   const [regen, setRegen] = useState(false);
   const [imgUrl, setImgUrl] = useState(post.image_url);
+  const [campaignId, setCampaignId] = useState(post.campaign_id || "");
 
   useEffect(() => {
     setCaption(post.caption || "");
@@ -902,6 +933,15 @@ function ApprovalCard({ post, onStatus }: { post: PostQueue; onStatus: (id: stri
   useEffect(() => {
     setImgUrl(post.image_url);
   }, [post.image_url]);
+
+  useEffect(() => {
+    setCampaignId(post.campaign_id || "");
+  }, [post.campaign_id]);
+
+  const setCampaign = async (val: string) => {
+    setCampaignId(val);
+    await supabase.from("post_queue").update({ campaign_id: val || null }).eq("id", post.id);
+  };
 
   const saveCaption = async () => {
     setSaving(true);
@@ -968,6 +1008,15 @@ function ApprovalCard({ post, onStatus }: { post: PostQueue; onStatus: (id: stri
           <button className="ghost" onClick={regenerate} disabled={regen}>
             {regen ? "Gerando…" : "🔄 Imagem"}
           </button>
+        </div>
+        <div style={{ marginTop: 10 }}>
+          <label style={{ fontSize: 11 }}>Campanha</label>
+          <select value={campaignId} onChange={(e) => setCampaign(e.target.value)}>
+            <option value="">— sem campanha —</option>
+            {campaigns.filter((c) => c.status === "active").map((c) => (
+              <option key={c.id} value={c.id}>{c.name}</option>
+            ))}
+          </select>
         </div>
         <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
           <button style={{ flex: 1, background: "var(--green)", color: "#04140c" }} onClick={() => onStatus(post.id, "approved")}>

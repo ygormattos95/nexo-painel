@@ -58,6 +58,7 @@ export type PostQueue = {
   published_at: string | null;
   ig_result: string | null;
   fb_result: string | null;
+  campaign_id: string | null;
 };
 
 export type InboxConversation = {
