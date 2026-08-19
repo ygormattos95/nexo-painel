@@ -72,7 +72,7 @@ function Login({ email, onEmail }: { email: string; onEmail: (v: string) => void
 function Dashboard({ userEmail }: { userEmail: string }) {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
-  const [tab, setTab] = useState<"overview" | "tasks" | "metrics" | "aprovacoes" | "chat" | "conhecimento" | "campanhas">("overview");
+  const [tab, setTab] = useState<"overview" | "tasks" | "metrics" | "aprovacoes" | "chat" | "conhecimento" | "campanhas" | "clientes">("overview");
   const [fArea, setFArea] = useState("");
   const [fStatus, setFStatus] = useState("");
   const [openTask, setOpenTask] = useState<Task | null>(null);
@@ -147,7 +147,7 @@ function Dashboard({ userEmail }: { userEmail: string }) {
       </header>
 
       <div className="tabs">
-        {(["overview", "tasks", "aprovacoes", "chat", "conhecimento", "campanhas", "metrics"] as const).map((t) => (
+        {(["overview", "tasks", "aprovacoes", "chat", "conhecimento", "campanhas", "clientes", "metrics"] as const).map((t) => (
           <div key={t} className={`tab ${tab === t ? "active" : ""}`} onClick={() => setTab(t)}>
             {t === "overview"
               ? "Visão Geral"
@@ -161,6 +161,8 @@ function Dashboard({ userEmail }: { userEmail: string }) {
               ? "Conhecimento"
               : t === "campanhas"
               ? "Campanhas"
+              : t === "clientes"
+              ? "Clientes"
               : "Métricas"}
           </div>
         ))}
@@ -348,6 +350,8 @@ function Dashboard({ userEmail }: { userEmail: string }) {
         {tab === "chat" && <ChatTab />}
 
         {tab === "campanhas" && <CampanhasTab />}
+
+        {tab === "clientes" && <ClientesTab />}
 
         {tab === "conhecimento" && <ConhecimentoTab />}
 
@@ -649,6 +653,125 @@ function ChatTab() {
                 <button onClick={send} disabled={sending || !reply.trim()}>
                   Enviar
                 </button>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function ClientesTab() {
+  const [items, setItems] = useState<Client[]>([]);
+  const [sel, setSel] = useState<string | null>(null);
+  const [form, setForm] = useState<Partial<Client>>({});
+  const [saving, setSaving] = useState(false);
+  const [counts, setCounts] = useState<Record<string, number>>({});
+
+  const load = useCallback(async () => {
+    const { data } = await supabase.from("clients").select("*").order("name");
+    setItems((data as Client[]) ?? []);
+    const { data: k } = await supabase.from("knowledge").select("client_id");
+    const c: Record<string, number> = {};
+    (k ?? []).forEach((x: any) => {
+      if (x.client_id) c[x.client_id] = (c[x.client_id] || 0) + 1;
+    });
+    setCounts(c);
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const selClient = items.find((c) => c.id === sel) || null;
+  useEffect(() => {
+    if (sel) setForm(selClient ? { ...selClient } : {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sel]);
+
+  const editing = sel !== null || form.name !== undefined;
+
+  const novo = () => {
+    setSel(null);
+    setForm({ name: "", status: "active" });
+  };
+
+  const save = async () => {
+    if (!form.name?.trim()) return;
+    setSaving(true);
+    const payload = {
+      name: form.name,
+      ig_handle: form.ig_handle || null,
+      fb_page: form.fb_page || null,
+      status: form.status || "active",
+      brand_brief: form.brand_brief || null,
+      notes: form.notes || null,
+    };
+    if (sel) {
+      await supabase.from("clients").update(payload).eq("id", sel);
+    } else {
+      const { data } = await supabase.from("clients").insert(payload).select("id").single();
+      if (data) setSel((data as any).id);
+    }
+    await load();
+    setSaving(false);
+  };
+
+  const ta = { width: "100%", padding: "10px 12px", borderRadius: 9, border: "1px solid var(--line)", background: "var(--panel2)", color: "var(--txt)", fontSize: 13, fontFamily: "inherit" } as const;
+
+  return (
+    <section>
+      <div className="toolbar">
+        <button onClick={novo}>+ Novo cliente</button>
+        <span className="muted">Agência multi-cliente — cada cliente com brief, redes e base de conhecimento próprios.</span>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "280px 1fr", gap: 12 }}>
+        <div className="card" style={{ padding: 0, overflow: "auto", maxHeight: 560 }}>
+          {items.map((c) => (
+            <div key={c.id} onClick={() => setSel(c.id)} className="clickable" style={{ padding: 12, borderBottom: "1px solid var(--line)", background: sel === c.id ? "var(--panel2)" : "transparent" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 6 }}>
+                <strong style={{ fontSize: 13 }}>{c.name}</strong>
+                <span className={`badge b-${c.status === "active" ? "running" : "cancelled"}`}>{c.status || "active"}</span>
+              </div>
+              <div className="mono">{c.ig_handle || c.fb_page || "sem redes"} · {counts[c.id] || 0} conh.</div>
+            </div>
+          ))}
+          {items.length === 0 && <div style={{ padding: 12 }} className="muted">Nenhum cliente.</div>}
+        </div>
+        <div className="card" style={{ padding: 16 }}>
+          {!editing ? (
+            <div className="muted">Selecione um cliente à esquerda ou clique em “Novo cliente”.</div>
+          ) : (
+            <>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                <div>
+                  <label>Nome</label>
+                  <input value={form.name || ""} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
+                </div>
+                <div>
+                  <label>Status</label>
+                  <select value={form.status || "active"} onChange={(e) => setForm((f) => ({ ...f, status: e.target.value }))}>
+                    <option value="active">active</option>
+                    <option value="paused">paused</option>
+                    <option value="archived">archived</option>
+                  </select>
+                </div>
+                <div>
+                  <label>Instagram (@)</label>
+                  <input value={form.ig_handle || ""} onChange={(e) => setForm((f) => ({ ...f, ig_handle: e.target.value }))} placeholder="@cliente" />
+                </div>
+                <div>
+                  <label>Página do Facebook</label>
+                  <input value={form.fb_page || ""} onChange={(e) => setForm((f) => ({ ...f, fb_page: e.target.value }))} placeholder="Nome/ID da página" />
+                </div>
+              </div>
+              <label style={{ marginTop: 12 }}>Brief da marca</label>
+              <textarea value={form.brand_brief || ""} onChange={(e) => setForm((f) => ({ ...f, brand_brief: e.target.value }))} rows={8} style={ta} placeholder="Perfil, público, tom de voz, temas recorrentes, o que evitar…" />
+              <label style={{ marginTop: 12 }}>Notas internas</label>
+              <textarea value={form.notes || ""} onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))} rows={3} style={ta} />
+              <div style={{ marginTop: 12 }}>
+                <button onClick={save} disabled={saving || !form.name?.trim()}>{sel ? "Salvar alterações" : "Criar cliente"}</button>
               </div>
             </>
           )}

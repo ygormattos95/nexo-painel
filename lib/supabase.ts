@@ -81,6 +81,11 @@ export type InboxMessage = {
 export type Client = {
   id: string;
   name: string;
+  brand_brief: string | null;
+  ig_handle: string | null;
+  fb_page: string | null;
+  status: string | null;
+  notes: string | null;
 };
 
 export type Knowledge = {
