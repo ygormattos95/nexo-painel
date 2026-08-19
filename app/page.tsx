@@ -328,7 +328,8 @@ function Dashboard({ userEmail }: { userEmail: string }) {
                   <th>Tema</th>
                   <th>Legenda</th>
                   <th>Status</th>
-                  <th>Agendado</th>
+                  <th>Campanha</th>
+                  <th>Engaj.</th>
                   <th>Post</th>
                 </tr>
               </thead>
@@ -336,12 +337,14 @@ function Dashboard({ userEmail }: { userEmail: string }) {
                 {queue.filter((p) => p.status !== "pending_approval").slice(0, 20).map((p) => {
                   const fbUrl = p.fb_result ? `https://www.facebook.com/${p.fb_result.split("_")[0]}/posts/${p.fb_result.split("_")[1] || ""}` : null;
                   const igUrl = p.ig_result ? "https://instagram.com/nexo.automacao" : null;
+                  const campName = p.campaign_id ? campaigns.find((c) => c.id === p.campaign_id)?.name : null;
                   return (
                     <tr key={p.id}>
                       <td>{p.theme}</td>
                       <td className="trunc" title={p.caption || ""}>{p.caption}</td>
                       <td><Badge s={p.status} /></td>
-                      <td className="mono">{fmt(p.scheduled_for)}</td>
+                      <td className="muted">{campName || "—"}</td>
+                      <td className="mono">{p.status === "published" ? `❤️ ${p.likes ?? 0} · 💬 ${p.comments ?? 0}` : "—"}</td>
                       <td>
                         {igUrl && (
                           <a href={igUrl} target="_blank" rel="noreferrer" style={{ marginRight: 8 }}>📸 IG</a>
@@ -355,7 +358,7 @@ function Dashboard({ userEmail }: { userEmail: string }) {
                   );
                 })}
                 {queue.filter((p) => p.status !== "pending_approval").length === 0 && (
-                  <tr><td colSpan={5} className="muted">Sem histórico ainda.</td></tr>
+                  <tr><td colSpan={6} className="muted">Sem histórico ainda.</td></tr>
                 )}
               </tbody>
             </table>
@@ -811,9 +814,10 @@ function ClientesTab() {
   );
 }
 
+type CampStat = { posts: number; published: number; likes: number; comments: number };
 function CampanhasTab() {
   const [items, setItems] = useState<Campaign[]>([]);
-  const [counts, setCounts] = useState<Record<string, number>>({});
+  const [stats, setStats] = useState<Record<string, CampStat>>({});
   const [name, setName] = useState("");
   const [objective, setObjective] = useState("");
   const [starts, setStarts] = useState("");
@@ -823,12 +827,18 @@ function CampanhasTab() {
   const load = useCallback(async () => {
     const { data } = await supabase.from("campaigns").select("*").order("created_at", { ascending: false });
     setItems((data as Campaign[]) ?? []);
-    const { data: pq } = await supabase.from("post_queue").select("campaign_id");
-    const c: Record<string, number> = {};
+    const { data: pq } = await supabase.from("post_queue").select("campaign_id,status,likes,comments");
+    const c: Record<string, CampStat> = {};
     (pq ?? []).forEach((p: any) => {
-      if (p.campaign_id) c[p.campaign_id] = (c[p.campaign_id] || 0) + 1;
+      if (!p.campaign_id) return;
+      const s = c[p.campaign_id] || { posts: 0, published: 0, likes: 0, comments: 0 };
+      s.posts++;
+      if (p.status === "published") s.published++;
+      s.likes += p.likes || 0;
+      s.comments += p.comments || 0;
+      c[p.campaign_id] = s;
     });
-    setCounts(c);
+    setStats(c);
   }, []);
 
   useEffect(() => {
@@ -886,17 +896,23 @@ function CampanhasTab() {
             <th>Objetivo</th>
             <th>Período</th>
             <th>Posts</th>
+            <th>Publicados</th>
+            <th>Engajamento</th>
             <th>Status</th>
             <th></th>
           </tr>
         </thead>
         <tbody>
-          {items.map((c) => (
+          {items.map((c) => {
+            const s = stats[c.id] || { posts: 0, published: 0, likes: 0, comments: 0 };
+            return (
             <tr key={c.id}>
               <td><strong>{c.name}</strong></td>
               <td className="muted">{c.objective || "—"}</td>
               <td className="mono">{c.starts_on || "—"} → {c.ends_on || "—"}</td>
-              <td>{counts[c.id] || 0}</td>
+              <td>{s.posts}</td>
+              <td>{s.published}</td>
+              <td className="mono">❤️ {s.likes} · 💬 {s.comments}</td>
               <td><span className={`badge b-${c.status === "active" ? "running" : "cancelled"}`}>{c.status}</span></td>
               <td>
                 <button className="ghost" onClick={() => setStatus(c.id, c.status === "active" ? "archived" : "active")}>
@@ -904,10 +920,11 @@ function CampanhasTab() {
                 </button>
               </td>
             </tr>
-          ))}
+            );
+          })}
           {items.length === 0 && (
             <tr>
-              <td colSpan={6} className="muted">Nenhuma campanha ainda.</td>
+              <td colSpan={8} className="muted">Nenhuma campanha ainda.</td>
             </tr>
           )}
         </tbody>
