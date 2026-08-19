@@ -344,7 +344,7 @@ function Dashboard({ userEmail }: { userEmail: string }) {
                       <td className="trunc" title={p.caption || ""}>{p.caption}</td>
                       <td><Badge s={p.status} /></td>
                       <td className="muted">{campName || "—"}</td>
-                      <td className="mono">{p.status === "published" ? `❤️ ${p.likes ?? 0} · 💬 ${p.comments ?? 0}` : "—"}</td>
+                      <td className="mono">{p.status === "published" ? `❤️ ${(p.likes ?? 0) + (p.fb_likes ?? 0)} · 💬 ${(p.comments ?? 0) + (p.fb_comments ?? 0)}` : "—"}</td>
                       <td>
                         {igUrl && (
                           <a href={igUrl} target="_blank" rel="noreferrer" style={{ marginRight: 8 }}>📸 IG</a>
@@ -827,15 +827,15 @@ function CampanhasTab() {
   const load = useCallback(async () => {
     const { data } = await supabase.from("campaigns").select("*").order("created_at", { ascending: false });
     setItems((data as Campaign[]) ?? []);
-    const { data: pq } = await supabase.from("post_queue").select("campaign_id,status,likes,comments");
+    const { data: pq } = await supabase.from("post_queue").select("campaign_id,status,likes,comments,fb_likes,fb_comments");
     const c: Record<string, CampStat> = {};
     (pq ?? []).forEach((p: any) => {
       if (!p.campaign_id) return;
       const s = c[p.campaign_id] || { posts: 0, published: 0, likes: 0, comments: 0 };
       s.posts++;
       if (p.status === "published") s.published++;
-      s.likes += p.likes || 0;
-      s.comments += p.comments || 0;
+      s.likes += (p.likes || 0) + (p.fb_likes || 0);
+      s.comments += (p.comments || 0) + (p.fb_comments || 0);
       c[p.campaign_id] = s;
     });
     setStats(c);

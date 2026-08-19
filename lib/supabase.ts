@@ -61,6 +61,8 @@ export type PostQueue = {
   campaign_id: string | null;
   likes: number | null;
   comments: number | null;
+  fb_likes: number | null;
+  fb_comments: number | null;
   metrics_at: string | null;
 };
 
