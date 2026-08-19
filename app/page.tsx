@@ -385,6 +385,8 @@ function Dashboard({ userEmail }: { userEmail: string }) {
 }
 
 const LEARN_URL = "https://n8nfloripa.floripacloset.com.br/webhook/nexo-aprender";
+const MANUAL_URL = "https://n8nfloripa.floripacloset.com.br/webhook/nexo-enviar-manual";
+const MANUAL_SECRET = "nx_sac_2f9a7c";
 
 function ConhecimentoTab() {
   const [clients, setClients] = useState<Client[]>([]);
@@ -554,8 +556,18 @@ function ChatTab() {
     setSending(true);
     const text = reply;
     setReply("");
-    await supabase.from("inbox_messages").insert({ conversation_id: sel, direction: "out", sender: "human", text });
-    await supabase.from("inbox_conversations").update({ last_message_at: new Date().toISOString() }).eq("id", sel);
+    try {
+      const r = await fetch(MANUAL_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ conversation_id: sel, text, secret: MANUAL_SECRET }),
+      });
+      if (!r.ok) throw new Error("falha ao enviar");
+    } catch {
+      // fallback: registra localmente para não perder a mensagem digitada
+      await supabase.from("inbox_messages").insert({ conversation_id: sel, direction: "out", sender: "human", text });
+      await supabase.from("inbox_conversations").update({ last_message_at: new Date().toISOString() }).eq("id", sel);
+    }
     await loadMsgs(sel);
     setSending(false);
   };
