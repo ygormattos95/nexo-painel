@@ -7,6 +7,39 @@ const fmt = (d?: string | null) =>
   d ? new Date(d).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—";
 const Badge = ({ s }: { s: string }) => <span className={`badge b-${s}`}>{s}</span>;
 
+type TabKey = "overview" | "tasks" | "aprovacoes" | "chat" | "conhecimento" | "campanhas" | "clientes" | "metrics";
+const NAV: { key: TabKey; label: string; icon: string }[] = [
+  { key: "overview", label: "Visão Geral", icon: "grid" },
+  { key: "tasks", label: "Tarefas", icon: "check" },
+  { key: "aprovacoes", label: "Aprovações", icon: "inbox" },
+  { key: "chat", label: "Chat", icon: "chat" },
+  { key: "conhecimento", label: "Conhecimento", icon: "book" },
+  { key: "campanhas", label: "Campanhas", icon: "mega" },
+  { key: "clientes", label: "Clientes", icon: "users" },
+  { key: "metrics", label: "Métricas", icon: "chart" },
+];
+const TITLES: Record<TabKey, string> = {
+  overview: "Visão Geral", tasks: "Tarefas", aprovacoes: "Aprovações", chat: "Chat",
+  conhecimento: "Conhecimento", campanhas: "Campanhas", clientes: "Clientes", metrics: "Métricas",
+};
+function Icon({ name }: { name: string }) {
+  const p: Record<string, JSX.Element> = {
+    grid: <><rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /><rect x="14" y="14" width="7" height="7" rx="1.5" /></>,
+    check: <><path d="M9 11l3 3L22 4" /><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" /></>,
+    inbox: <><path d="M22 12h-6l-2 3h-4l-2-3H2" /><path d="M5.5 5h13l3.5 7v6a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-6L5.5 5z" /></>,
+    chat: <path d="M21 15a2 2 0 0 1-2 2H8l-5 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />,
+    book: <><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" /><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" /></>,
+    mega: <><path d="M3 11v2a1 1 0 0 0 1 1h2l4 4V6L6 10H4a1 1 0 0 0-1 1z" /><path d="M14 8a4 4 0 0 1 0 8" /><path d="M18 5a8 8 0 0 1 0 14" /></>,
+    users: <><circle cx="9" cy="8" r="3.5" /><path d="M2 21a7 7 0 0 1 14 0" /><path d="M17 8a3.5 3.5 0 0 1 0 7" /><path d="M18 21a7 7 0 0 0-3-5.7" /></>,
+    chart: <><path d="M3 3v18h18" /><rect x="7" y="12" width="3" height="6" rx="1" /><rect x="12" y="8" width="3" height="10" rx="1" /><rect x="17" y="5" width="3" height="13" rx="1" /></>,
+  };
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      {p[name]}
+    </svg>
+  );
+}
+
 export default function Page() {
   const [ready, setReady] = useState(false);
   const [email, setEmail] = useState("");
@@ -79,6 +112,17 @@ function Dashboard({ userEmail }: { userEmail: string }) {
   const [queue, setQueue] = useState<PostQueue[]>([]);
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [cost, setCost] = useState<{ ai: number; posts: number; usd: number }>({ ai: 0, posts: 0, usd: 0 });
+  const [theme, setTheme] = useState<"dark" | "light">("dark");
+  const [navOpen, setNavOpen] = useState(false);
+
+  useEffect(() => {
+    const saved = (typeof window !== "undefined" ? localStorage.getItem("nexo-theme") : null) as "dark" | "light" | null;
+    if (saved === "light" || saved === "dark") setTheme(saved);
+  }, []);
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", theme);
+    try { localStorage.setItem("nexo-theme", theme); } catch {}
+  }, [theme]);
 
   const load = useCallback(async () => {
     const since = new Date(Date.now() - 864e5).toISOString();
@@ -143,47 +187,39 @@ function Dashboard({ userEmail }: { userEmail: string }) {
   const count = (s: string) => tasks.filter((t) => t.status === s).length;
 
   return (
-    <div>
-      <header>
-        <div className="brand">
-          Nexo <span>Painel</span>
+    <div className={`app ${navOpen ? "nav-open" : ""}`}>
+      <aside className="sidebar">
+        <div className="side-brand">Nexo <span>CRM</span></div>
+        <nav className="nav">
+          {NAV.map((n) => (
+            <button key={n.key} className={`nav-item ${tab === n.key ? "active" : ""}`} onClick={() => { setTab(n.key); setNavOpen(false); }}>
+              <Icon name={n.icon} />
+              <span>{n.label}</span>
+              {n.key === "aprovacoes" && pendingCount > 0 && <span className="nav-badge">{pendingCount}</span>}
+            </button>
+          ))}
+        </nav>
+        <div className="side-foot">
+          <span className="who">{userEmail}</span>
+          <button className="ghost sm" onClick={() => supabase.auth.signOut()}>Sair</button>
         </div>
-        <span className="badge b-working">
-          <span className="dot pulse"></span>ao vivo
-        </span>
-        <div className="spacer"></div>
-        <span className="who">{userEmail}</span>
-        <button className="ghost" onClick={load}>
-          Atualizar
-        </button>
-        <button className="ghost" onClick={() => supabase.auth.signOut()}>
-          Sair
-        </button>
-      </header>
+      </aside>
 
-      <div className="tabs">
-        {(["overview", "tasks", "aprovacoes", "chat", "conhecimento", "campanhas", "clientes", "metrics"] as const).map((t) => (
-          <div key={t} className={`tab ${tab === t ? "active" : ""}`} onClick={() => setTab(t)}>
-            {t === "overview"
-              ? "Visão Geral"
-              : t === "tasks"
-              ? "Tarefas"
-              : t === "aprovacoes"
-              ? `Aprovações${pendingCount ? ` (${pendingCount})` : ""}`
-              : t === "chat"
-              ? "Chat"
-              : t === "conhecimento"
-              ? "Conhecimento"
-              : t === "campanhas"
-              ? "Campanhas"
-              : t === "clientes"
-              ? "Clientes"
-              : "Métricas"}
-          </div>
-        ))}
-      </div>
+      <div className="overlay" onClick={() => setNavOpen(false)} />
 
-      <main>
+      <div className="main-col">
+        <header className="topbar">
+          <button className="menu-btn" onClick={() => setNavOpen((v) => !v)} aria-label="Menu">☰</button>
+          <h1>{TITLES[tab]}</h1>
+          <span className="badge-live"><span className="dot pulse" />ao vivo</span>
+          <div className="spacer" />
+          <button className="icon-btn" title="Alternar tema" onClick={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}>
+            {theme === "dark" ? "☀" : "☾"}
+          </button>
+          <button className="ghost sm" onClick={load}>Atualizar</button>
+        </header>
+
+        <main className="content">
         {tab === "overview" && (
           <section>
             <div className="grid metrics">
@@ -418,7 +454,8 @@ function Dashboard({ userEmail }: { userEmail: string }) {
             </div>
           </section>
         )}
-      </main>
+        </main>
+      </div>
 
       <TaskDrawer task={openTask} onClose={() => setOpenTask(null)} />
     </div>
