@@ -996,7 +996,9 @@ function ApprovalCard({ post, onStatus, campaigns }: { post: PostQueue; onStatus
 
   return (
     <div className="card" style={{ overflow: "hidden" }}>
-      {post.type === "carousel" && post.images && post.images.length > 0 ? (
+      {post.type === "reel" && post.video_url ? (
+        <video src={post.video_url} controls playsInline style={{ width: "100%", display: "block", borderBottom: "1px solid var(--line)", background: "#000", maxHeight: 480 }} />
+      ) : post.type === "carousel" && post.images && post.images.length > 0 ? (
         <div style={{ display: "flex", overflowX: "auto", gap: 4, borderBottom: "1px solid var(--line)", background: "#000" }}>
           {post.images.map((u, i) => (
             // eslint-disable-next-line @next/next/no-img-element
