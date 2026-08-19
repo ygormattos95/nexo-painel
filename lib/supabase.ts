@@ -64,6 +64,9 @@ export type PostQueue = {
   fb_likes: number | null;
   fb_comments: number | null;
   metrics_at: string | null;
+  type: string | null;
+  images: string[] | null;
+  video_url: string | null;
 };
 
 export type InboxConversation = {

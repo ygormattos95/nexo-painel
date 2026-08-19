@@ -996,16 +996,25 @@ function ApprovalCard({ post, onStatus, campaigns }: { post: PostQueue; onStatus
 
   return (
     <div className="card" style={{ overflow: "hidden" }}>
-      {imgUrl && (
+      {post.type === "carousel" && post.images && post.images.length > 0 ? (
+        <div style={{ display: "flex", overflowX: "auto", gap: 4, borderBottom: "1px solid var(--line)", background: "#000" }}>
+          {post.images.map((u, i) => (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img key={i} src={u} alt={`slide ${i + 1}`} style={{ height: 260, width: "auto", flex: "0 0 auto" }} />
+          ))}
+        </div>
+      ) : imgUrl ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img
           src={imgUrl}
           alt={post.theme || "post"}
           style={{ width: "100%", display: "block", borderBottom: "1px solid var(--line)", opacity: regen ? 0.4 : 1, transition: "opacity .3s" }}
         />
-      )}
+      ) : null}
       <div style={{ padding: 14 }}>
-        <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8 }}>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8, flexWrap: "wrap" }}>
+          {post.type === "carousel" && <span className="badge b-approved">🎠 Carrossel {post.images?.length || ""}</span>}
+          {post.type === "reel" && <span className="badge b-approved">🎬 Reels</span>}
           <span className="badge b-running">{post.theme || "Post"}</span>
           <span className="mono">{fmt(post.scheduled_for)}</span>
         </div>
