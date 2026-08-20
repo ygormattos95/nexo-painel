@@ -13,11 +13,24 @@ export type Agent = {
   id: string;
   slug: string;
   name: string;
-  kind: "orchestrator" | "subagent";
+  kind: "orchestrator" | "subagent" | "custom";
   area: string | null;
   status: string;
   is_active: boolean;
   config: any;
+  system_prompt: string | null;
+  description: string | null;
+  run_freq: string | null;
+  run_hour: number | null;
+  objective: string | null;
+  last_run: string | null;
+};
+
+export type AgentRun = {
+  id: string;
+  agent_id: string;
+  output: string | null;
+  created_at: string;
 };
 
 export type Task = {

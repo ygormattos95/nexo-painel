@@ -1,15 +1,16 @@
 "use client";
 
 import { useEffect, useMemo, useState, useCallback } from "react";
-import { supabase, Agent, Task, TaskLog, Result, PostQueue, InboxConversation, InboxMessage, Client, Knowledge, Campaign } from "@/lib/supabase";
+import { supabase, Agent, Task, TaskLog, Result, PostQueue, InboxConversation, InboxMessage, Client, Knowledge, Campaign, AgentRun } from "@/lib/supabase";
 
 const fmt = (d?: string | null) =>
   d ? new Date(d).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—";
 const Badge = ({ s }: { s: string }) => <span className={`badge b-${s}`}>{s}</span>;
 
-type TabKey = "overview" | "tasks" | "aprovacoes" | "chat" | "conhecimento" | "campanhas" | "clientes" | "metrics";
+type TabKey = "overview" | "agentes" | "tasks" | "aprovacoes" | "chat" | "conhecimento" | "campanhas" | "clientes" | "metrics";
 const NAV: { key: TabKey; label: string; icon: string }[] = [
   { key: "overview", label: "Visão Geral", icon: "grid" },
+  { key: "agentes", label: "Agentes", icon: "bot" },
   { key: "tasks", label: "Tarefas", icon: "check" },
   { key: "aprovacoes", label: "Aprovações", icon: "inbox" },
   { key: "chat", label: "Chat", icon: "chat" },
@@ -19,7 +20,7 @@ const NAV: { key: TabKey; label: string; icon: string }[] = [
   { key: "metrics", label: "Métricas", icon: "chart" },
 ];
 const TITLES: Record<TabKey, string> = {
-  overview: "Visão Geral", tasks: "Tarefas", aprovacoes: "Aprovações", chat: "Chat",
+  overview: "Visão Geral", agentes: "Agentes", tasks: "Tarefas", aprovacoes: "Aprovações", chat: "Chat",
   conhecimento: "Conhecimento", campanhas: "Campanhas", clientes: "Clientes", metrics: "Métricas",
 };
 function Icon({ name }: { name: string }) {
@@ -32,6 +33,7 @@ function Icon({ name }: { name: string }) {
     mega: <><path d="M3 11v2a1 1 0 0 0 1 1h2l4 4V6L6 10H4a1 1 0 0 0-1 1z" /><path d="M14 8a4 4 0 0 1 0 8" /><path d="M18 5a8 8 0 0 1 0 14" /></>,
     users: <><circle cx="9" cy="8" r="3.5" /><path d="M2 21a7 7 0 0 1 14 0" /><path d="M17 8a3.5 3.5 0 0 1 0 7" /><path d="M18 21a7 7 0 0 0-3-5.7" /></>,
     chart: <><path d="M3 3v18h18" /><rect x="7" y="12" width="3" height="6" rx="1" /><rect x="12" y="8" width="3" height="10" rx="1" /><rect x="17" y="5" width="3" height="13" rx="1" /></>,
+    bot: <><rect x="4" y="8" width="16" height="12" rx="3" /><path d="M12 8V4" /><circle cx="9" cy="14" r="1.2" /><circle cx="15" cy="14" r="1.2" /><path d="M2 13v3M22 13v3" /></>,
   };
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -105,7 +107,7 @@ function Login({ email, onEmail }: { email: string; onEmail: (v: string) => void
 function Dashboard({ userEmail }: { userEmail: string }) {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
-  const [tab, setTab] = useState<"overview" | "tasks" | "metrics" | "aprovacoes" | "chat" | "conhecimento" | "campanhas" | "clientes">("overview");
+  const [tab, setTab] = useState<TabKey>("overview");
   const [fArea, setFArea] = useState("");
   const [fStatus, setFStatus] = useState("");
   const [openTask, setOpenTask] = useState<Task | null>(null);
@@ -402,6 +404,8 @@ function Dashboard({ userEmail }: { userEmail: string }) {
         )}
 
         {tab === "chat" && <ChatTab />}
+
+        {tab === "agentes" && <AgentesTab />}
 
         {tab === "campanhas" && <CampanhasTab />}
 
@@ -724,6 +728,170 @@ function ChatTab() {
                   Enviar
                 </button>
               </div>
+            </>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+const RUN_AGENT_URL = "https://n8nfloripa.floripacloset.com.br/webhook/nexo-run-agent";
+
+function AgentesTab() {
+  const [items, setItems] = useState<Agent[]>([]);
+  const [sel, setSel] = useState<string | null>(null);
+  const [form, setForm] = useState<Partial<Agent>>({});
+  const [runs, setRuns] = useState<AgentRun[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [running, setRunning] = useState(false);
+
+  const load = useCallback(async () => {
+    const { data } = await supabase.from("agents").select("*").order("kind", { ascending: false }).order("name");
+    setItems((data as Agent[]) ?? []);
+  }, []);
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const selAgent = items.find((a) => a.id === sel) || null;
+  useEffect(() => {
+    if (sel) {
+      setForm(selAgent ? { ...selAgent } : {});
+      supabase.from("agent_runs").select("*").eq("agent_id", sel).order("created_at", { ascending: false }).limit(5).then(({ data }) => setRuns((data as AgentRun[]) ?? []));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sel]);
+
+  const editing = sel !== null || form.name !== undefined;
+  const isCustom = form.kind === "custom" || (!sel && form.name !== undefined);
+
+  const novo = () => {
+    setSel(null);
+    setRuns([]);
+    setForm({ name: "", kind: "custom", is_active: true, run_freq: "off", run_hour: 9, system_prompt: "", description: "", objective: "" });
+  };
+
+  const save = async () => {
+    if (!form.name?.trim()) return;
+    setSaving(true);
+    const payload: any = {
+      name: form.name,
+      description: form.description || null,
+      system_prompt: form.system_prompt || null,
+      is_active: form.is_active ?? true,
+      objective: form.objective || null,
+      run_freq: form.run_freq || "off",
+      run_hour: form.run_hour ?? 9,
+    };
+    if (sel) {
+      await supabase.from("agents").update(payload).eq("id", sel);
+    } else {
+      payload.kind = "custom";
+      payload.slug = "custom-" + (form.name || "agente").toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 36) + "-" + Math.random().toString(36).slice(2, 6);
+      payload.status = "idle";
+      const { data } = await supabase.from("agents").insert(payload).select("id").single();
+      if (data) setSel((data as any).id);
+    }
+    await load();
+    setSaving(false);
+  };
+
+  const runNow = async () => {
+    if (!sel) return;
+    setRunning(true);
+    try {
+      await fetch(RUN_AGENT_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ agent_id: sel }) });
+    } catch {}
+    setTimeout(async () => {
+      const { data } = await supabase.from("agent_runs").select("*").eq("agent_id", sel).order("created_at", { ascending: false }).limit(5);
+      setRuns((data as AgentRun[]) ?? []);
+      setRunning(false);
+    }, 6000);
+  };
+
+  const ta = { width: "100%", padding: "10px 12px", borderRadius: 10, border: "1px solid var(--line)", background: "var(--panel2)", color: "var(--txt)", fontSize: 13, fontFamily: "inherit" } as const;
+  const kindLabel = (k: string) => (k === "orchestrator" ? "Orquestrador" : k === "custom" ? "Custom" : "Subagente");
+
+  return (
+    <section>
+      <div className="toolbar">
+        <button onClick={novo}>+ Novo agente</button>
+        <span className="muted">Veja funções e prompts, edite o comportamento e crie agentes com agendamento.</span>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "300px 1fr", gap: 12 }}>
+        <div className="card" style={{ padding: 0, overflow: "auto", maxHeight: 640 }}>
+          {items.map((a) => (
+            <div key={a.id} onClick={() => setSel(a.id)} className="clickable" style={{ padding: 12, borderBottom: "1px solid var(--line)", background: sel === a.id ? "var(--panel2)" : "transparent" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 6, alignItems: "center" }}>
+                <strong style={{ fontSize: 13 }}>{a.name}</strong>
+                <span className={`badge b-${a.is_active ? "running" : "offline"}`}>{a.is_active ? "ativo" : "off"}</span>
+              </div>
+              <div className="mono">{kindLabel(a.kind)}{a.area ? " · " + a.area : ""}</div>
+            </div>
+          ))}
+          {items.length === 0 && <div style={{ padding: 12 }} className="muted">Nenhum agente.</div>}
+        </div>
+
+        <div className="card" style={{ padding: 16 }}>
+          {!editing ? (
+            <div className="muted">Selecione um agente à esquerda ou clique em “Novo agente”.</div>
+          ) : (
+            <>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 10, alignItems: "end" }}>
+                <div>
+                  <label>Nome</label>
+                  <input value={form.name || ""} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
+                </div>
+                <label style={{ display: "flex", alignItems: "center", gap: 8, margin: 0, whiteSpace: "nowrap" }}>
+                  <input type="checkbox" style={{ width: "auto" }} checked={form.is_active ?? true} onChange={(e) => setForm((f) => ({ ...f, is_active: e.target.checked }))} /> Ativo
+                </label>
+              </div>
+              <label>Função</label>
+              <input value={form.description || ""} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} placeholder="O que este agente faz" />
+              <label>Prompt (comportamento)</label>
+              <textarea value={form.system_prompt || ""} onChange={(e) => setForm((f) => ({ ...f, system_prompt: e.target.value }))} rows={8} style={ta} placeholder="Instruções que definem como o agente age…" />
+
+              {isCustom && (
+                <>
+                  <label>Objetivo (o que produzir a cada execução)</label>
+                  <textarea value={form.objective || ""} onChange={(e) => setForm((f) => ({ ...f, objective: e.target.value }))} rows={3} style={ta} placeholder="Ex.: Gere 3 ideias de post sobre automação para esta semana." />
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                    <div>
+                      <label>Agendamento</label>
+                      <select value={form.run_freq || "off"} onChange={(e) => setForm((f) => ({ ...f, run_freq: e.target.value }))}>
+                        <option value="off">Sob demanda (só Rodar agora)</option>
+                        <option value="daily">Todo dia</option>
+                        <option value="hourly">A cada hora</option>
+                      </select>
+                    </div>
+                    {form.run_freq === "daily" && (
+                      <div>
+                        <label>Hora (0–23)</label>
+                        <input type="number" min={0} max={23} value={form.run_hour ?? 9} onChange={(e) => setForm((f) => ({ ...f, run_hour: Number(e.target.value) }))} />
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+
+              <div style={{ display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap", alignItems: "center" }}>
+                <button onClick={save} disabled={saving || !form.name?.trim()}>{sel ? "Salvar" : "Criar agente"}</button>
+                {sel && <button className="ghost" onClick={runNow} disabled={running}>{running ? "Rodando…" : "▶ Rodar agora"}</button>}
+                {form.last_run && <span className="muted" style={{ fontSize: 12 }}>Última execução: {fmt(form.last_run)}</span>}
+              </div>
+
+              {sel && runs.length > 0 && (
+                <>
+                  <div className="section-title">Últimas execuções</div>
+                  {runs.map((r) => (
+                    <div key={r.id} className="result" style={{ marginBottom: 8 }}>
+                      <div className="mono" style={{ marginBottom: 6 }}>{fmt(r.created_at)}</div>
+                      {r.output}
+                    </div>
+                  ))}
+                </>
+              )}
             </>
           )}
         </div>
