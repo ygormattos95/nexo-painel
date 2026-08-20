@@ -1,4 +1,6 @@
 FROM nginx:alpine
-COPY . /usr/share/nginx/html
-RUN sed -ri 's/listen[[:space:]]+80;/listen 3000;/' /etc/nginx/conf.d/default.conf
+COPY index.html /usr/share/nginx/html/index.html
+COPY logo.png /usr/share/nginx/html/logo.png
+COPY privacidade /usr/share/nginx/html/privacidade
+COPY nginx.conf /etc/nginx/conf.d/default.conf
 EXPOSE 3000
